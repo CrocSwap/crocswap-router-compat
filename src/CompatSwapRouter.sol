@@ -9,6 +9,11 @@ import "./libraries/TickMath.sol";
 import "./libraries/Directives.sol";
 
 error NotAuthorized();
+error DeadlineExceeded();
+error ReEntrant();
+error ReceivedEtherOutsideSwap();
+error NegativeOutput(int128);
+error InsufficientOutput(uint256);
 
 /// @title A Uniswap Swap Router compatible router for Ambient
 /// @author strobie <strobie@crocodilelabs.io>
@@ -46,12 +51,12 @@ contract CompatSwapRouter is ICompatSwapRouter {
     ////////////////////////////////////////////////// */
 
     modifier checkDeadline(uint256 deadline) {
-        require(block.timestamp <= deadline, "Transaction too old");
+        if (block.timestamp > deadline) revert DeadlineExceeded();
         _;
     }
 
     modifier inSwap(address swapRecipient) {
-        require(swapRecipient_ == address(0), "Re-entrant call");
+        if (swapRecipient_ != address(0)) revert ReEntrant();
         swapRecipient_ = swapRecipient;
         _;
         swapRecipient_ = address(0);
@@ -72,7 +77,7 @@ contract CompatSwapRouter is ICompatSwapRouter {
     ////////////////////////////////////////////////// */
 
     receive() external payable {
-        require(swapRecipient_ != address(0), "Does not receive Ether outside lock");
+        if (swapRecipient_ == address(0)) revert ReceivedEtherOutsideSwap();
     }
 
     /* //////////////////////////////////////////////////
@@ -179,14 +184,14 @@ contract CompatSwapRouter is ICompatSwapRouter {
             minOut
         );
         int128 outFlow = isBaseIn ? -quoteFlow : -baseFlow;
-        require(outFlow >= 0, "Negative output");
+        if (outFlow < 0) revert NegativeOutput(outFlow);
         amountOut = uint256(int256(outFlow));
 
         (uint256 baseBal, uint256 quoteBal) = settleTokens(base, quote);
         if (isBaseIn) {
-            require(quoteBal >= amountOut, "Insufficient output");
+            if (quoteBal < amountOut) revert InsufficientOutput(quoteBal);
         } else {
-            require(baseBal >= amountOut, "Insufficient output");
+            if (baseBal < amountOut) revert InsufficientOutput(baseBal);
         }
     }
 
@@ -206,7 +211,7 @@ contract CompatSwapRouter is ICompatSwapRouter {
         (int128 baseFlow, int128 quoteFlow) =
             execSwapExactInput(base, quote, poolIdx_, isBaseIn, isBaseIn, qty, 0, isBaseIn ? TickMath.MAX_SQRT_RATIO - 1 : TickMath.MIN_SQRT_RATIO + 1, 0);
         int128 outFlow = isBaseIn ? -quoteFlow : -baseFlow;
-        require(outFlow >= 0, "Negative output");
+        if (outFlow < 0) revert NegativeOutput(outFlow);
         qty = uint128(uint256(int256(outFlow)));
 
         if (path.hasMultiplePools()) {
@@ -222,7 +227,7 @@ contract CompatSwapRouter is ICompatSwapRouter {
                     base, quote, poolIdx_, isBaseIn, isBaseIn, qty, 0, isBaseIn ? TickMath.MAX_SQRT_RATIO - 1 : TickMath.MIN_SQRT_RATIO + 1, 0
                 );
                 outFlow = isBaseIn ? -quoteFlow : -baseFlow;
-                require(outFlow >= 0, "Negative output");
+                if (outFlow < 0) revert NegativeOutput(outFlow);
                 qty = uint128(uint256(int256(outFlow)));
                 tokenOut_ = isBaseIn ? quote : base;
                 path = path.skipToken();
@@ -230,7 +235,7 @@ contract CompatSwapRouter is ICompatSwapRouter {
         }
 
         settleTokens(tokenIn_, tokenOut_);
-        require(qty >= minOut, "Insufficient output");
+        if (qty < minOut) revert InsufficientOutput(qty);
         return qty;
     }
 }
