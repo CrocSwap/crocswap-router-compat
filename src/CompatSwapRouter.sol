@@ -73,9 +73,10 @@ contract CompatSwapRouter is ICompatSwapRouter {
     }
 
     /* //////////////////////////////////////////////////
-    ////////////           RECEIVE()          ///////////
+    ////////////           FALLBACK           ///////////
     ////////////////////////////////////////////////// */
 
+    /// @notice Fallback function to reject ether outside of swaps, since this contract is not meant to hold money
     receive() external payable {
         if (swapRecipient_ == address(0)) revert ReceivedEtherOutsideSwap();
     }
